@@ -12,7 +12,7 @@ app.use(express.json());
 const getAuthToken = async () => {
   try {
     const response = await axios.post(
-      'https://merchant-sandbox.qpay.mn/v2/auth/token',
+      'https://merchant.qpay.mn/v2/auth/token',
       {},
       {
         headers: {
@@ -33,15 +33,15 @@ app.post('/api/create-invoice', async (req, res) => {
     const token = await getAuthToken();
     
     const invoiceResponse = await axios.post(
-      'https://merchant-sandbox.qpay.mn/v2/invoice',
+      'https://merchant.qpay.mn/v2/invoice',
       {
-        invoice_code: "TEST_INVOICE",
+        invoice_code: "ACADEMIA_INVOICE",
         sender_invoice_no: Date.now().toString(), // Unique invoice number
         invoice_receiver_code: "terminal",
-        invoice_description: "test81",
-        sender_branch_code: "SALBAR2",
+        invoice_description: "academia81",
+        sender_branch_code: "SALBARACADEMIA",
         amount: 100,
-        callback_url: "http://174.129.173.184:5000"
+        callback_url: "http://174.129.173.184:5000/api/payment-callback"
       },
       {
         headers: {
