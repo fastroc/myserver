@@ -40,7 +40,7 @@ app.post('/api/create-invoice', async (req, res) => {
         invoice_receiver_code: "terminal",
         invoice_description: "academia81",
         sender_branch_code: "SALBARACADEMIA",
-        amount: 100,
+        amount: 1000,
         callback_url: "http://174.129.173.184:5000/api/payment-callback"
       },
       {
