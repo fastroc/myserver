@@ -51,7 +51,7 @@ app.post('/api/create-invoice', async (req, res) => {
     const invoiceResponse = await axios.post(
       'https://merchant.qpay.mn/v2/invoice',
       {
-        invoice_code: "ACADEMIA_INVOICE",
+        invoice_code: "ACADEMIA_INVOICE1",
         sender_invoice_no: Date.now().toString(), // Unique invoice number
         invoice_receiver_code: "terminal",
         invoice_description: "academiacareer",
