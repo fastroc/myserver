@@ -51,7 +51,7 @@ app.post('/api/create-invoice', async (req, res) => {
     const invoiceResponse = await axios.post(
       'https://merchant.qpay.mn/v2/invoice',
       {
-        invoice_code: "TEST_INVOICE",
+        invoice_code: "ACADEMIA_INVOICE_1",
         sender_invoice_no: Date.now().toString(), // Unique invoice number
         invoice_receiver_code: "terminal",
         invoice_description: "academiacareer",
@@ -142,7 +142,7 @@ app.get('/api/payment-status/:invoiceId', async (req, res) => {
   }
 });
 
-//third changes
+//seventh changes
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
