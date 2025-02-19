@@ -85,11 +85,18 @@ const payments = new Map(); // Temporary storage, replace with DB in production
 // Add these endpoints after your create-invoice route
 // Updated callback handler
 app.get('/api/payment-status/:paymentId', async (req, res) => {
+  
+  const { paymentId } = req.params;
+
+  if (!paymentId) {
+    return res.status(400).json({ error: 'Payment ID is required' });
+  }
+
   try {
-    const payment = payments.get(req.params.paymentId);
+    const payment = payments.get(paymentId);
     
-    if (!qpay_payment_id) {
-      return res.status(400).json({ error: 'Missing payment ID' });
+    if (!payment) {
+      return res.status(404).json({ error: 'Payment not found' });
     }
 
     // Verify payment status
@@ -108,9 +115,7 @@ app.get('/api/payment-status/:paymentId', async (req, res) => {
 
     res.status(200).send('SUCCESS');
   } catch (error) {
-    if (error.response?.status === 400) {
-      return res.status(404).json({ error: 'Payment not found' });
-    }
+    console.error('Payment status check failed:', error);
     res.status(500).json({ error: 'Payment verification failed' });
   }
 });
