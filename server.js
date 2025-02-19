@@ -84,9 +84,9 @@ const payments = new Map(); // Temporary storage, replace with DB in production
 
 // Add these endpoints after your create-invoice route
 // Updated callback handler
-app.get('/api/payment-callback', async (req, res) => {
+app.get('/api/payment-status/:paymentId', async (req, res) => {
   try {
-    const { qpay_payment_id } = req.query;
+    const payment = payments.get(req.params.paymentId);
     
     if (!qpay_payment_id) {
       return res.status(400).json({ error: 'Missing payment ID' });
@@ -95,22 +95,23 @@ app.get('/api/payment-callback', async (req, res) => {
     // Verify payment status
     const token = await getAuthToken();
     const paymentInfo = await axios.get(
-      `https://merchant.qpay.mn/v2/payment/${qpay_payment_id}`,
+      `https://merchant.qpay.mn/v2/payment/${req.params.paymentId}`, // Use payment ID
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
-    // Store payment details
-    const { object_id, payment_status } = paymentInfo.data;
-    payments.set(object_id, { 
-      status: payment_status,
+    // Store using payment ID as the key
+    payments.set(qpay_payment_id, { 
+      status: paymentInfo.data.payment_status,
       details: paymentInfo.data,
-      verified: true // Mark as verified
+      verified: true
     });
 
     res.status(200).send('SUCCESS');
   } catch (error) {
-    console.error('Callback error:', error);
-    res.status(500).send('Callback processing failed');
+    if (error.response?.status === 400) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+    res.status(500).json({ error: 'Payment verification failed' });
   }
 });
 
