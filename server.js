@@ -47,8 +47,7 @@ const getAuthToken = async () => {
 app.post('/api/create-invoice', async (req, res) => {
   try {
     const token = await getAuthToken();
-    
-    const invoiceResponse = await axios.post(
+        const invoiceResponse = await axios.post(
       'https://merchant.qpay.mn/v2/invoice',
       {
         invoice_code: "ACADEMIA_MN_INVOICE",
@@ -66,7 +65,7 @@ app.post('/api/create-invoice', async (req, res) => {
         }
       }
     );
-
+    console.log('Invoice created:', invoiceResponse.data); // Log the response
     res.json(invoiceResponse.data);
   } catch (error) {
     console.error('Invoice creation failed:', error.response?.data || error.message);
@@ -76,6 +75,9 @@ app.post('/api/create-invoice', async (req, res) => {
     });
   }
 });
+
+
+
 
 // Add after your existing imports
 const payments = new Map(); // Temporary storage, replace with DB in production
@@ -132,6 +134,7 @@ app.get('/api/payment-status/:invoiceId', async (req, res) => {
       });
     }
 
+    console.log('Payment status:', payments.get(req.params.invoiceId)); // Log the status
     res.json(payments.get(req.params.invoiceId) || { 
       status: 'PENDING', 
       details: null 
