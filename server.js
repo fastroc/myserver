@@ -1,21 +1,59 @@
 const express = require('express');
+const mysql = require('mysql2/promise');
 const axios = require('axios');
+const bodyParser = require('body-parser');
 const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(bodyParser.json());
 
 let authToken = null;
 let tokenExpiration = 0;
 const payments = new Map();
 const invoiceToPaymentMap = new Map();
 
-// Promo code server URL
-const PROMO_SERVER_URL = 'http://localhost:5001';
+// MySQL connection pool
+const pool = mysql.createPool({
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || 'Fastcroc1981m',
+    database: process.env.DB_NAME || 'promo_tracker',
+    connectionLimit: 10
+});
 
-// Get authentication token (keep your existing function)
+// Middleware to verify promo code
+const verifyPromoCode = async (req, res, next) => {
+    const { promoCode } = req.body;
+    if (!promoCode) {
+        req.discount = 0;
+        return next();
+    }
+
+    try {
+        const [rows] = await pool.execute(
+            'SELECT * FROM promo_codes WHERE promo_code = ? AND is_active = TRUE',
+            [promoCode.toUpperCase()]
+        );
+        
+        if (rows.length === 0) {
+            req.discount = 0;
+            return next();
+        }
+        
+        req.discount = rows[0].discount_percentage;
+        req.promoCode = rows[0].promo_code;
+        req.promoId = rows[0].promo_id;
+        next();
+    } catch (error) {
+        console.error('Promo code verification error:', error);
+        req.discount = 0;
+        next();
+    }
+};
+
+// Get authentication token
 const getAuthToken = async () => {
     const now = Math.floor(Date.now() / 1000);
     if (authToken && now < tokenExpiration) {
@@ -42,34 +80,11 @@ const getAuthToken = async () => {
     }
 };
 
-// Middleware to verify promo code and apply discount
-const verifyPromoCode = async (req, res, next) => {
-    const { promoCode } = req.body;
-    if (!promoCode) {
-        req.discount = 0; // No discount if no promo code
-        return next();
-    }
-
-    try {
-        const response = await axios.get(`${PROMO_SERVER_URL}/api/promo/verify`, {
-            params: { promoCode }
-        });
-
-        req.discount = response.data.discountPercentage || 0;
-        req.promoCode = response.data.promoCode;
-        next();
-    } catch (error) {
-        console.error('Promo code verification failed:', error.response?.data || error.message);
-        req.discount = 0; // Default to no discount if verification fails
-        next(); // Proceed anyway, treat as no promo code
-    }
-};
-
-// Create Invoice with Promo Code Support
+// Create Invoice
 app.post('/api/create-invoice', verifyPromoCode, async (req, res) => {
     try {
         const token = await getAuthToken();
-        const baseAmount = 1500; // Original price in MNT
+        const baseAmount = 1500;
         const discountAmount = baseAmount * (req.discount / 100);
         const finalAmount = baseAmount - discountAmount;
 
@@ -98,7 +113,8 @@ app.post('/api/create-invoice', verifyPromoCode, async (req, res) => {
             details: null,
             verified: false,
             promoCode: req.promoCode,
-            customerEmail: req.body.email // Store email for usage tracking
+            promoId: req.promoId,
+            customerEmail: req.body.email
         });
 
         console.log('Invoice created:', invoiceResponse.data);
@@ -117,7 +133,7 @@ app.post('/api/create-invoice', verifyPromoCode, async (req, res) => {
     }
 });
 
-// Callback handler with promo usage tracking
+// Callback handler
 app.get('/api/payment-callback', async (req, res) => {
     const { qpay_payment_id } = req.query;
 
@@ -135,12 +151,11 @@ app.get('/api/payment-callback', async (req, res) => {
         const invoiceId = paymentInfo.data.object_id;
         const paymentData = payments.get(invoiceId);
 
-        if (paymentInfo.data.payment_status === 'PAID' && paymentData?.promoCode) {
-            // Record promo code usage
-            await axios.post(`${PROMO_SERVER_URL}/api/promo/use`, {
-                promoCode: paymentData.promoCode,
-                customerEmail: paymentData.customerEmail || 'unknown@example.com'
-            });
+        if (paymentInfo.data.payment_status === 'PAID' && paymentData?.promoId) {
+            await pool.execute(
+                'INSERT INTO promo_usage (promo_id, customer_email) VALUES (?, ?)',
+                [paymentData.promoId, paymentData.customerEmail || 'unknown@example.com']
+            );
         }
 
         payments.set(qpay_payment_id, {
@@ -157,9 +172,8 @@ app.get('/api/payment-callback', async (req, res) => {
         res.status(500).json({ error: 'Callback processing failed' });
     }
 });
-//Hey commit again! 888 f,kljdlkgjdkljfkldjfklsdjf lots of it
 
-// Payment status endpoint (unchanged)
+// Payment status endpoint
 app.get('/api/payment-status/:id', async (req, res) => {
     const { id } = req.params;
 
@@ -191,7 +205,6 @@ app.get('/api/payment-status/:id', async (req, res) => {
                 },
                 { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
             );
-          
 
             console.log('QPay check response:', checkResponse.data);
 
@@ -215,6 +228,30 @@ app.get('/api/payment-status/:id', async (req, res) => {
     } catch (error) {
         console.error('Payment status check failed:', error.response?.data || error.message);
         res.status(500).json({ error: 'Payment verification failed', details: error.response?.data });
+    }
+});
+
+// Promo code stats endpoint
+app.get('/api/promo/stats', async (req, res) => {
+    try {
+        const [stats] = await pool.execute(`
+            SELECT 
+                u.username,
+                pc.promo_code,
+                pc.discount_percentage,
+                COUNT(pu.usage_id) as usage_count,
+                COUNT(DISTINCT pu.customer_email) as unique_customers
+            FROM promo_codes pc
+            LEFT JOIN promo_usage pu ON pc.promo_id = pu.promo_id
+            JOIN users u ON pc.user_id = u.user_id
+            GROUP BY pc.promo_id, u.username, pc.promo_code, pc.discount_percentage
+            ORDER BY usage_count DESC
+        `);
+
+        res.json(stats);
+    } catch (error) {
+        console.error('Promo stats error:', error);
+        res.status(500).json({ error: 'Failed to fetch promo statistics' });
     }
 });
 
