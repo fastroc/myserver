@@ -157,7 +157,7 @@ app.get('/api/payment-callback', async (req, res) => {
         res.status(500).json({ error: 'Callback processing failed' });
     }
 });
-//What is going on? ldfgldkg;lkdfl;gkfd;lgkdf;lkg;ldfkg
+//Hey commit again!
 
 // Payment status endpoint (unchanged)
 app.get('/api/payment-status/:id', async (req, res) => {
