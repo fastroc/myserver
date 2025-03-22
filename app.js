@@ -1,85 +1,100 @@
-const express = require('express');
-const mysql = require('mysql2/promise');
-const axios = require('axios');
-const bodyParser = require('body-parser');
-const cors = require('cors');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-require('dotenv').config();
+// Import required modules
+const express = require('express');           // Web framework for Node.js
+const mysql = require('mysql2/promise');      // MySQL client with promise support
+const axios = require('axios');               // HTTP client for API requests
+const bodyParser = require('body-parser');    // Parse incoming request bodies
+const cors = require('cors');                 // Enable Cross-Origin Resource Sharing
+const jwt = require('jsonwebtoken');          // JSON Web Token for authentication
+const bcrypt = require('bcryptjs');           // Password hashing for security
+require('dotenv').config();                   // Load environment variables from .env
 
+// Initialize Express app
 const app = express();
-app.use(cors());
-app.use(bodyParser.json());
+app.use(cors());                              // Allow requests from different origins
+app.use(bodyParser.json());                   // Parse JSON request bodies
 
-let authToken = null;
-let tokenExpiration = 0;
-const payments = new Map();
-const invoiceToPaymentMap = new Map();
+// Global variables for QPay authentication token
+let authToken = null;                         // Stores the current QPay auth token
+let tokenExpiration = 0;                      // Tracks when the token expires
+const payments = new Map();                   // In-memory store for payment statuses
+const invoiceToPaymentMap = new Map();        // Maps invoice IDs to payment IDs
 
-const JWT_SECRET = 'your-secret-key'; // Change this in production!
+// Secret key for JWT - CHANGE THIS IN PRODUCTION TO A SECURE VALUE!
+const JWT_SECRET = 'your-secret-key';
 
-// MySQL connection pool
+// MySQL connection pool setup
 const pool = mysql.createPool({
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'app_user', // Updated to app_user
-    password: process.env.DB_PASSWORD || 'SecurePass123!',
-    database: process.env.DB_NAME || 'promo_tracker',
-    connectionLimit: 10
+    host: process.env.DB_HOST || 'localhost',         // Database host (from .env or default)
+    user: process.env.DB_USER || 'app_user',          // Database user (updated to app_user)
+    password: process.env.DB_PASSWORD || 'SecurePass123!', // Password for app_user
+    database: process.env.DB_NAME || 'promo_tracker', // Database name
+    connectionLimit: 10                               // Max concurrent connections
 });
 
-// Middleware to verify admin JWT
+// Middleware to verify admin JWT token
 const authenticateAdmin = (req, res, next) => {
+    // Extract token from Authorization header (format: "Bearer <token>")
     const token = req.headers['authorization']?.split(' ')[1];
-    if (!token) return res.status(401).json({ error: 'No token provided' });
+    if (!token) {
+        return res.status(401).json({ error: 'No token provided' });
+    }
 
     try {
+        // Verify the token using the secret key
         const decoded = jwt.verify(token, JWT_SECRET);
-        req.adminId = decoded.adminId;
-        next();
+        req.adminId = decoded.adminId; // Attach admin ID to request
+        next(); // Proceed to the next middleware/route
     } catch (error) {
-        res.status(401).json({ error: 'Invalid token' });
+        return res.status(401).json({ error: 'Invalid token' });
     }
 };
 
-// Admin Login
+// Admin login endpoint
 app.post('/api/admin/login', async (req, res) => {
-    const { username, password } = req.body;
+    const { username, password } = req.body; // Get credentials from request body
     try {
+        // Query the admins table for the user
         const [admins] = await pool.execute('SELECT * FROM admins WHERE username = ?', [username]);
-        if (admins.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
+        if (admins.length === 0) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
 
         const admin = admins[0];
+        // Compare provided password with stored hashed password
         if (!bcrypt.compareSync(password, admin.password)) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
+        // Generate a JWT token valid for 1 hour
         const token = jwt.sign({ adminId: admin.admin_id }, JWT_SECRET, { expiresIn: '1h' });
-        res.json({ token });
+        res.json({ token }); // Send token to client
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ error: 'Login failed' });
     }
 });
 
-// Middleware to verify promo code
+// Middleware to verify promo codes
 const verifyPromoCode = async (req, res, next) => {
-    const { promoCode } = req.body;
+    const { promoCode } = req.body; // Get promo code from request body
     if (!promoCode) {
-        req.discount = 0;
+        req.discount = 0; // No promo code, no discount
         return next();
     }
 
     try {
+        // Check if promo code exists and is active
         const [rows] = await pool.execute(
             'SELECT * FROM promo_codes WHERE promo_code = ? AND is_active = TRUE',
             [promoCode.toUpperCase()]
         );
 
         if (rows.length === 0) {
-            req.discount = 0;
+            req.discount = 0; // Invalid or inactive promo code
             return next();
         }
 
+        // Set discount and promo details on request object
         req.discount = rows[0].discount_percentage;
         req.promoCode = rows[0].promo_code;
         req.promoId = rows[0].promo_id;
@@ -91,11 +106,11 @@ const verifyPromoCode = async (req, res, next) => {
     }
 };
 
-// Get authentication token
+// Function to get QPay authentication token
 const getAuthToken = async () => {
     const now = Math.floor(Date.now() / 1000);
     if (authToken && now < tokenExpiration) {
-        return authToken;
+        return authToken; // Return cached token if valid
     }
 
     try {
@@ -118,11 +133,11 @@ const getAuthToken = async () => {
     }
 };
 
-// Create Invoice
+// Create Invoice endpoint
 app.post('/api/create-invoice', verifyPromoCode, async (req, res) => {
     try {
         const token = await getAuthToken();
-        const baseAmount = 1500;
+        const baseAmount = 1500; // Base price in MNT
         const discountAmount = baseAmount * (req.discount / 100);
         const finalAmount = baseAmount - discountAmount;
 
@@ -171,7 +186,7 @@ app.post('/api/create-invoice', verifyPromoCode, async (req, res) => {
     }
 });
 
-// Callback handler
+// Callback handler for QPay
 app.get('/api/payment-callback', async (req, res) => {
     const { qpay_payment_id } = req.query;
 
@@ -269,11 +284,11 @@ app.get('/api/payment-status/:id', async (req, res) => {
     }
 });
 
-// Promo code stats endpoint
-app.get('/api/promo/stats', async (req, res) => {
+// Promo code stats endpoint (protected for admin only)
+app.get('/api/promo/stats', authenticateAdmin, async (req, res) => {
     try {
         const [stats] = await pool.execute(`
-            SELECT 
+            SELECT
                 u.username,
                 pc.promo_code,
                 pc.discount_percentage,
@@ -293,5 +308,6 @@ app.get('/api/promo/stats', async (req, res) => {
     }
 });
 
+// Start the server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
