@@ -46,26 +46,6 @@ const authenticateAdmin = (req, res, next) => {
     }
 };
 
-// Admin Login endpoint
-app.post('/api/admin/login', async (req, res) => {
-    const { username, password } = req.body;
-    try {
-        const [admins] = await pool.execute('SELECT * FROM admins WHERE username = ?', [username]);
-        if (admins.length === 0) {
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-        const admin = admins[0];
-        if (!bcrypt.compareSync(password, admin.password)) {
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-        const token = jwt.sign({ adminId: admin.admin_id }, JWT_SECRET, { expiresIn: '1h' });
-        res.json({ token });
-    } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ error: 'Login failed' });
-    }
-});
-
 // Middleware to verify promo codes
 const verifyPromoCode = async (req, res, next) => {
     const { promoCode } = req.body;
@@ -117,6 +97,39 @@ const getAuthToken = async () => {
         throw error;
     }
 };
+
+// Admin Login endpoint
+app.post('/api/admin/login', async (req, res) => {
+    const { username, password } = req.body;
+    try {
+        const [admins] = await pool.execute('SELECT * FROM admins WHERE username = ?', [username]);
+        if (admins.length === 0) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+        const admin = admins[0];
+        if (!bcrypt.compareSync(password, admin.password)) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+        const token = jwt.sign({ adminId: admin.admin_id }, JWT_SECRET, { expiresIn: '1h' });
+        res.json({ token });
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ error: 'Login failed' });
+    }
+});
+
+// Verify admin token
+app.get('/api/admin/verify', authenticateAdmin, async (req, res) => {
+    try {
+        const [admins] = await pool.execute('SELECT * FROM admins WHERE admin_id = ?', [req.adminId]);
+        if (admins.length === 0) {
+            return res.status(404).json({ error: 'Admin not found' });
+        }
+        res.json({ name: admins[0].username });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
 
 // Create Invoice endpoint
 app.post('/api/create-invoice', verifyPromoCode, async (req, res) => {
@@ -302,6 +315,39 @@ app.post('/api/promo/create', authenticateAdmin, async (req, res) => {
     } catch (error) {
         console.error('Create promo error:', error);
         res.status(500).json({ error: 'Failed to create promo code' });
+    }
+});
+
+// List promos (admin only)
+app.get('/api/promo/list', authenticateAdmin, async (req, res) => {
+    try {
+        const [promos] = await pool.execute('SELECT * FROM promo_codes WHERE is_active = TRUE');
+        res.json(promos);
+    } catch (error) {
+        console.error('List promos error:', error);
+        res.status(500).json({ error: 'Failed to fetch promos' });
+    }
+});
+
+// Modify promo (admin only)
+app.put('/api/promo/:id', authenticateAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { promo_code, user_id, discount_percentage } = req.body;
+    if (!promo_code || !user_id || !discount_percentage) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    try {
+        const [result] = await pool.execute(
+            'UPDATE promo_codes SET promo_code = ?, user_id = ?, discount_percentage = ? WHERE promo_id = ?',
+            [promo_code.toUpperCase(), user_id, discount_percentage, id]
+        );
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Promo code not found' });
+        }
+        res.json({ message: 'Promo updated successfully' });
+    } catch (error) {
+        console.error('Modify promo error:', error);
+        res.status(500).json({ error: 'Failed to update promo' });
     }
 });
 
