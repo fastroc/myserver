@@ -340,7 +340,7 @@ app.put('/api/promo/:id', async (req, res) => {
     }
 
     try {
-        const [result] = await db.query(
+        const [result] = await pool.query(
             'UPDATE promo_codes SET promo_code = ?, user_id = ?, discount_percentage = ?, is_active = ? WHERE promo_id = ?',
             [promo_code, user_id, discount_percentage, is_active !== undefined ? is_active : true, id]
         );
