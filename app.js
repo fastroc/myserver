@@ -330,27 +330,37 @@ app.get('/api/promo/list', authenticateAdmin, async (req, res) => {
 });
 
 // Modify promo (admin only)
-app.put('/api/promo/:id', authenticateAdmin, async (req, res) => {
+app.put('/api/promo/:id', async (req, res) => {
     const { id } = req.params;
-    const { promo_code, user_id, discount_percentage } = req.body;
-    if (!promo_code || !user_id || !discount_percentage) {
-        return res.status(400).json({ error: 'Missing required fields' });
+    const { promo_code, user_id, discount_percentage, is_active } = req.body;
+
+    // Validate required fields
+    if (!promo_code || !user_id || discount_percentage === undefined) {
+        return res.status(400).json({ error: 'Missing required fields: promo_code, user_id, and discount_percentage are required' });
     }
+
     try {
-        const [result] = await pool.execute(
-            'UPDATE promo_codes SET promo_code = ?, user_id = ?, discount_percentage = ? WHERE promo_id = ?',
-            [promo_code.toUpperCase(), user_id, discount_percentage, id]
+        const [result] = await db.query(
+            'UPDATE promo_codes SET promo_code = ?, user_id = ?, discount_percentage = ?, is_active = ? WHERE promo_id = ?',
+            [promo_code, user_id, discount_percentage, is_active !== undefined ? is_active : true, id]
         );
+
         if (result.affectedRows === 0) {
             return res.status(404).json({ error: 'Promo code not found' });
         }
-        res.json({ message: 'Promo updated successfully' });
-    } catch (error) {
-        console.error('Modify promo error:', error);
-        res.status(500).json({ error: 'Failed to update promo' });
+
+        res.status(200).json({ message: 'Promo code updated successfully' });
+    } catch (err) {
+        console.error('Error updating promo code:', err);
+        if (err.code === 'ER_DUP_ENTRY') {
+            return res.status(400).json({ error: 'Promo code already exists' });
+        }
+        if (err.code === 'ER_NO_REFERENCED_ROW_2') {
+            return res.status(400).json({ error: 'Invalid user_id: User does not exist' });
+        }
+        res.status(500).json({ error: 'Failed to update promo code', details: err.message });
     }
 });
-
 // Delete promo code (admin only)
 app.delete('/api/promo/:code', authenticateAdmin, async (req, res) => {
     const { code } = req.params;
