@@ -329,7 +329,7 @@ app.get('/api/promo/list', authenticateAdmin, async (req, res) => {
     }
 });
 
-// Modify promo (admin only)
+// Modify promo (admin only)  88
 app.put('/api/promo/:id', async (req, res) => {
     const { id } = req.params;
     const { promo_code, user_id, discount_percentage, is_active } = req.body;
@@ -361,6 +361,7 @@ app.put('/api/promo/:id', async (req, res) => {
         res.status(500).json({ error: 'Failed to update promo code', details: err.message });
     }
 });
+
 // Delete promo code (admin only)
 app.delete('/api/promo/:code', authenticateAdmin, async (req, res) => {
     const { code } = req.params;
