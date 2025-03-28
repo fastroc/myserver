@@ -1,14 +1,10 @@
-// Import required modules
 const express = require('express');
 const mysql = require('mysql2/promise');
 const axios = require('axios');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
-// Initialize Express app
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
@@ -19,9 +15,6 @@ let tokenExpiration = 0;
 const payments = new Map();
 const invoiceToPaymentMap = new Map();
 
-// Secret key for JWT - CHANGE THIS IN PRODUCTION TO A SECURE VALUE!
-const JWT_SECRET = 'your-secret-key';
-
 // MySQL connection pool setup
 const pool = mysql.createPool({
     host: process.env.DB_HOST || 'localhost',
@@ -30,21 +23,6 @@ const pool = mysql.createPool({
     database: process.env.DB_NAME || 'promo_tracker',
     connectionLimit: 10
 });
-
-// Middleware to verify admin JWT token
-const authenticateAdmin = (req, res, next) => {
-    const token = req.headers['authorization']?.split(' ')[1];
-    if (!token) {
-        return res.status(401).json({ error: 'No token provided' });
-    }
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        req.adminId = decoded.adminId;
-        next();
-    } catch (error) {
-        return res.status(401).json({ error: 'Invalid token' });
-    }
-};
 
 // Middleware to verify promo codes
 const verifyPromoCode = async (req, res, next) => {
@@ -76,12 +54,10 @@ const verifyPromoCode = async (req, res, next) => {
 // Function to get QPay authentication token
 const getAuthToken = async () => {
     const now = Math.floor(Date.now() / 1000);
-    if (authToken && now < tokenExpiration) {
-        return authToken;
-    }
+    if (authToken && now < tokenExpiration) return authToken;
     try {
         const response = await axios.post(
-            'https://merchant.qpay.mn/v2/auth/token',
+            '.https://merchant.qpay.mn/v2/auth/token',
             {},
             {
                 headers: {
@@ -97,39 +73,6 @@ const getAuthToken = async () => {
         throw error;
     }
 };
-
-// Admin Login endpoint
-app.post('/api/admin/login', async (req, res) => {
-    const { username, password } = req.body;
-    try {
-        const [admins] = await pool.execute('SELECT * FROM admins WHERE username = ?', [username]);
-        if (admins.length === 0) {
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-        const admin = admins[0];
-        if (!bcrypt.compareSync(password, admin.password)) {
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-        const token = jwt.sign({ adminId: admin.admin_id }, JWT_SECRET, { expiresIn: '1h' });
-        res.json({ token });
-    } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ error: 'Login failed' });
-    }
-});
-
-// Verify admin token
-app.get('/api/admin/verify', authenticateAdmin, async (req, res) => {
-    try {
-        const [admins] = await pool.execute('SELECT * FROM admins WHERE admin_id = ?', [req.adminId]);
-        if (admins.length === 0) {
-            return res.status(404).json({ error: 'Admin not found' });
-        }
-        res.json({ name: admins[0].username });
-    } catch (error) {
-        res.status(500).json({ error: 'Server error' });
-    }
-});
 
 // Create Invoice endpoint
 app.post('/api/create-invoice', verifyPromoCode, async (req, res) => {
@@ -277,135 +220,6 @@ app.get('/api/payment-status/:id', async (req, res) => {
     }
 });
 
-// Promo code stats endpoint (admin only)
-app.get('/api/promo/stats', authenticateAdmin, async (req, res) => {
-    try {
-        const [stats] = await pool.execute(`
-            SELECT 
-                u.username,
-                pc.promo_code,
-                pc.discount_percentage,
-                COUNT(pu.usage_id) as usage_count,
-                COUNT(DISTINCT pu.customer_email) as unique_customers
-            FROM promo_codes pc
-            LEFT JOIN promo_usage pu ON pc.promo_id = pu.promo_id
-            JOIN users u ON pc.user_id = u.user_id
-            GROUP BY pc.promo_id, u.username, pc.promo_code, pc.discount_percentage
-            ORDER BY usage_count DESC
-        `);
-        res.json(stats);
-    } catch (error) {
-        console.error('Promo stats error:', error);
-        res.status(500).json({ error: 'Failed to fetch promo statistics' });
-    }
-});
-
-// Create promo code (admin only)
-app.post('/api/promo/create', authenticateAdmin, async (req, res) => {
-    const { promo_code, user_id, discount_percentage } = req.body;
-    if (!promo_code || !user_id || !discount_percentage) {
-        return res.status(400).json({ error: 'Missing required fields' });
-    }
-    try {
-        await pool.execute(
-            'INSERT INTO promo_codes (promo_code, user_id, discount_percentage, is_active) VALUES (?, ?, ?, TRUE)',
-            [promo_code.toUpperCase(), user_id, discount_percentage]
-        );
-        res.status(201).json({ message: 'Promo code created successfully' });
-    } catch (error) {
-        console.error('Create promo error:', error);
-        res.status(500).json({ error: 'Failed to create promo code' });
-    }
-});
-
-// List promos (admin only)
-app.get('/api/promo/list', authenticateAdmin, async (req, res) => {
-    try {
-        const [promos] = await pool.execute('SELECT * FROM promo_codes WHERE is_active = TRUE');
-        res.json(promos);
-    } catch (error) {
-        console.error('List promos error:', error);
-        res.status(500).json({ error: 'Failed to fetch promos' });
-    }
-});
-
-// Modify promo (admin only)  88
-app.put('/api/promo/:id', async (req, res) => {
-    const { id } = req.params;
-    const { promo_code, user_id, discount_percentage, is_active } = req.body;
-
-    // Validate required fields
-    if (!promo_code || !user_id || discount_percentage === undefined) {
-        return res.status(400).json({ error: 'Missing required fields: promo_code, user_id, and discount_percentage are required' });
-    }
-
-    try {
-        const [result] = await pool.query(
-            'UPDATE promo_codes SET promo_code = ?, user_id = ?, discount_percentage = ?, is_active = ? WHERE promo_id = ?',
-            [promo_code, user_id, discount_percentage, is_active !== undefined ? is_active : true, id]
-        );
-
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Promo code not found' });
-        }
-
-        res.status(200).json({ message: 'Promo code updated successfully' });
-    } catch (err) {
-        console.error('Error updating promo code:', err);
-        if (err.code === 'ER_DUP_ENTRY') {
-            return res.status(400).json({ error: 'Promo code already exists' });
-        }
-        if (err.code === 'ER_NO_REFERENCED_ROW_2') {
-            return res.status(400).json({ error: 'Invalid user_id: User does not exist' });
-        }
-        res.status(500).json({ error: 'Failed to update promo code', details: err.message });
-    }
-});
-
-// Delete promo code (admin only)
-app.delete('/api/promo/:code', authenticateAdmin, async (req, res) => {
-    const { code } = req.params;
-    try {
-        const [result] = await pool.execute(
-            'UPDATE promo_codes SET is_active = FALSE WHERE promo_code = ?',
-            [code.toUpperCase()]
-        );
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Promo code not found' });
-        }
-        res.json({ message: 'Promo code deactivated successfully' });
-    } catch (error) {
-        console.error('Delete promo error:', error);
-        res.status(500).json({ error: 'Failed to delete promo code' });
-    }
-});
-
-// Payment info endpoint (admin only)
-app.get('/api/payments', authenticateAdmin, async (req, res) => {
-    try {
-        const [payments] = await pool.execute(`
-            SELECT 
-                pu.customer_email,
-                pc.promo_code,
-                pu.used_at,
-                u.gender,
-                u.age,
-                u.name,
-                u.game1,
-                u.game2,
-                u.game3
-            FROM promo_usage pu
-            LEFT JOIN promo_codes pc ON pu.promo_id = pc.promo_id
-            LEFT JOIN users u ON pu.customer_email = u.email
-            ORDER BY pu.used_at DESC
-        `);
-        res.json(payments);
-    } catch (error) {
-        console.error('Payment info error:', error);
-        res.status(500).json({ error: 'Failed to fetch payment info' });
-    }
-});
-
 // Start the server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Payment server running on port ${PORT}`));
