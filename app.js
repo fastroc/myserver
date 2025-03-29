@@ -81,7 +81,7 @@ const getAuthToken = async () => {
 app.post('/api/create-invoice', verifyPromoCode, async (req, res) => {
   try {
     const token = await getAuthToken();
-    const baseAmount = 15000; // Aligned with frontend
+    const baseAmount = 1500; // Aligned with frontend
     const discountAmount = baseAmount * (req.discount / 100);
     const finalAmount = baseAmount - discountAmount;
 
